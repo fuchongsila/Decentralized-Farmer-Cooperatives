@@ -3,7 +3,7 @@ import { Clarinet, Tx, Chain, Account, Contract } from "@hirosystems/clarinet-sd
 
 describe("Farmer Reputation and Reliability Scoring System", () => {
   it("should initialize a farmer's reputation profile with default values", () => {
-    const contract = new Contract("farmer-reputation");
+    const contract = new Contract("coop-unified");
     const deployer = Clarinet.accounts.get("deployer")!;
 
     const result = contract.call("initialize-farmer-reputation", [deployer.address]);
@@ -12,7 +12,7 @@ describe("Farmer Reputation and Reliability Scoring System", () => {
   });
 
   it("should retrieve an initialized farmer's reputation profile", () => {
-    const contract = new Contract("farmer-reputation");
+    const contract = new Contract("coop-unified");
     const deployer = Clarinet.accounts.get("deployer")!;
 
     contract.call("initialize-farmer-reputation", [deployer.address]);
@@ -22,7 +22,7 @@ describe("Farmer Reputation and Reliability Scoring System", () => {
   });
 
   it("should record a completed task and increase reliability score", () => {
-    const contract = new Contract("farmer-reputation");
+    const contract = new Contract("coop-unified");
     const deployer = Clarinet.accounts.get("deployer")!;
 
     contract.call("initialize-farmer-reputation", [deployer.address]);
@@ -32,7 +32,7 @@ describe("Farmer Reputation and Reliability Scoring System", () => {
   });
 
   it("should record a failed task and decrease reliability score", () => {
-    const contract = new Contract("farmer-reputation");
+    const contract = new Contract("coop-unified");
     const deployer = Clarinet.accounts.get("deployer")!;
 
     contract.call("initialize-farmer-reputation", [deployer.address]);
@@ -42,7 +42,7 @@ describe("Farmer Reputation and Reliability Scoring System", () => {
   });
 
   it("should allow farmers to submit ratings for each other", () => {
-    const contract = new Contract("farmer-reputation");
+    const contract = new Contract("coop-unified");
     const deployer = Clarinet.accounts.get("deployer")!;
     const wallet1 = Clarinet.accounts.get("wallet_1")!;
 
@@ -56,7 +56,7 @@ describe("Farmer Reputation and Reliability Scoring System", () => {
   });
 
   it("should reject a rating outside 1-10 range", () => {
-    const contract = new Contract("farmer-reputation");
+    const contract = new Contract("coop-unified");
     const deployer = Clarinet.accounts.get("deployer")!;
 
     const result = contract.call("submit-farmer-rating", [
@@ -69,7 +69,7 @@ describe("Farmer Reputation and Reliability Scoring System", () => {
   });
 
   it("should prevent a farmer from rating themselves", () => {
-    const contract = new Contract("farmer-reputation");
+    const contract = new Contract("coop-unified");
     const deployer = Clarinet.accounts.get("deployer")!;
 
     const result = contract.call("submit-farmer-rating", [
@@ -82,7 +82,7 @@ describe("Farmer Reputation and Reliability Scoring System", () => {
   });
 
   it("should retrieve a submitted rating", () => {
-    const contract = new Contract("farmer-reputation");
+    const contract = new Contract("coop-unified");
     const deployer = Clarinet.accounts.get("deployer")!;
     const wallet1 = Clarinet.accounts.get("wallet_1")!;
 
@@ -101,7 +101,7 @@ describe("Farmer Reputation and Reliability Scoring System", () => {
   });
 
   it("should calculate average reliability score correctly", () => {
-    const contract = new Contract("farmer-reputation");
+    const contract = new Contract("coop-unified");
     const deployer = Clarinet.accounts.get("deployer")!;
 
     contract.call("initialize-farmer-reputation", [deployer.address]);
@@ -117,7 +117,7 @@ describe("Farmer Reputation and Reliability Scoring System", () => {
   });
 
   it("should calculate success rate for a farmer", () => {
-    const contract = new Contract("farmer-reputation");
+    const contract = new Contract("coop-unified");
     const deployer = Clarinet.accounts.get("deployer")!;
 
     contract.call("initialize-farmer-reputation", [deployer.address]);
@@ -134,7 +134,7 @@ describe("Farmer Reputation and Reliability Scoring System", () => {
   });
 
   it("should return 0 success rate for farmer with no tasks", () => {
-    const contract = new Contract("farmer-reputation");
+    const contract = new Contract("coop-unified");
     const deployer = Clarinet.accounts.get("deployer")!;
 
     contract.call("initialize-farmer-reputation", [deployer.address]);
@@ -147,7 +147,7 @@ describe("Farmer Reputation and Reliability Scoring System", () => {
   });
 
   it("should track participation count across task records", () => {
-    const contract = new Contract("farmer-reputation");
+    const contract = new Contract("coop-unified");
     const deployer = Clarinet.accounts.get("deployer")!;
 
     contract.call("initialize-farmer-reputation", [deployer.address]);
@@ -163,7 +163,7 @@ describe("Farmer Reputation and Reliability Scoring System", () => {
   });
 
   it("should update a farmer's rating when resubmitting", () => {
-    const contract = new Contract("farmer-reputation");
+    const contract = new Contract("coop-unified");
     const deployer = Clarinet.accounts.get("deployer")!;
     const wallet1 = Clarinet.accounts.get("wallet_1")!;
 
@@ -183,7 +183,7 @@ describe("Farmer Reputation and Reliability Scoring System", () => {
   });
 
   it("should handle multiple farmers and ratings", () => {
-    const contract = new Contract("farmer-reputation");
+    const contract = new Contract("coop-unified");
     const deployer = Clarinet.accounts.get("deployer")!;
     const wallet1 = Clarinet.accounts.get("wallet_1")!;
     const wallet2 = Clarinet.accounts.get("wallet_2")!;
@@ -203,7 +203,7 @@ describe("Farmer Reputation and Reliability Scoring System", () => {
   });
 
   it("should compute reliability with multiple task attempts", () => {
-    const contract = new Contract("farmer-reputation");
+    const contract = new Contract("coop-unified");
     const deployer = Clarinet.accounts.get("deployer")!;
 
     contract.call("initialize-farmer-reputation", [deployer.address]);

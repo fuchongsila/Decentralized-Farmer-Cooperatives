@@ -9,10 +9,6 @@ requirements = []
 path = 'contracts/coop-unified.clar'
 clarity_version = 3
 epoch = 'latest'
-[contracts.farmer-reputation]
-path = 'contracts/farmer-reputation.clar'
-clarity_version = 3
-epoch = 'latest'
 [repl.analysis]
 passes = ['check_checker']
 
