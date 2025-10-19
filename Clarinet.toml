@@ -5,13 +5,8 @@ authors = []
 telemetry = true
 cache_dir = '.\.cache'
 requirements = []
-[contracts.FarmerCo-op]
-path = 'contracts/FarmerCo-op.clar'
-clarity_version = 3
-epoch = 'latest'
-
-[contracts.CropInsurancePool]
-path = 'contracts/CropInsurancePool.clar'
+[contracts.coop-unified]
+path = 'contracts/coop-unified.clar'
 clarity_version = 3
 epoch = 'latest'
 [repl.analysis]
