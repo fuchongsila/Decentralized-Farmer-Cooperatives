@@ -11,10 +11,19 @@
 (define-constant ERR_CLAIM_NOT_APPROVED (err u208))
 (define-constant ERR_REP_NOT_FOUND (err u209))
 (define-constant ERR_INVALID_SCORE (err u210))
+(define-constant ERR_MILESTONE_NOT_FOUND (err u211))
+(define-constant ERR_PROJECT_NOT_FOUND (err u212))
+(define-constant ERR_MILESTONE_COMPLETED (err u213))
+(define-constant ERR_NOT_PROJECT_OWNER (err u214))
+(define-constant ERR_MILESTONE_NOT_COMPLETED (err u215))
+(define-constant ERR_ALREADY_RELEASED (err u216))
+(define-constant ERR_PROJECT_CLOSED (err u217))
 
 (define-data-var coop-id-counter uint u0)
 (define-data-var proposal-id-counter uint u0)
 (define-data-var claim-id-counter uint u0)
+(define-data-var project-id-counter uint u0)
+(define-data-var milestone-id-counter uint u0)
 
 (define-map cooperatives
   uint
@@ -142,6 +151,42 @@
     comment: (string-ascii 200),
     timestamp: uint
   }
+)
+
+(define-map funded-projects
+  uint
+  {
+    coop-id: uint,
+    project-owner: principal,
+    title: (string-ascii 100),
+    description: (string-ascii 500),
+    total-budget: uint,
+    total-milestones: uint,
+    completed-milestones: uint,
+    released-amount: uint,
+    is-active: bool,
+    created-at: uint
+  }
+)
+
+(define-map project-milestones
+  { project-id: uint, milestone-id: uint }
+  {
+    description: (string-ascii 200),
+    budget: uint,
+    is-completed: bool,
+    is-approved: bool,
+    is-released: bool,
+    completion-date: uint,
+    approval-votes: uint,
+    rejection-votes: uint,
+    voting-end: uint
+  }
+)
+
+(define-map milestone-votes
+  { project-id: uint, milestone-id: uint, voter: principal }
+  { approved: bool, voting-power: uint }
 )
 
 (define-public (create-cooperative (name (string-ascii 50)))
@@ -767,131 +812,178 @@
 (define-constant BK_VERIFIED u5)
 (define-constant BK_CANCELED u6)
 (define-public (create-equipment-coop (id uint) (treasury principal) (fee-bps uint) (active bool))
-  (begin
-    (asserts! (is-eq tx-sender (var-get equipment-contract-owner)) ERR_UNAUTH)
-    (match (map-get? equipment-coops id)
-      (some val) (err ERR_EXISTS_EQ)
-      none (begin (map-set equipment-coops id {treasury:treasury, fee-bps:fee-bps, active:active}) (ok true))))
+  (let
+    ((existing (map-get? equipment-coops id)))
+    (begin
+      (asserts! (is-eq tx-sender (var-get equipment-contract-owner)) (err ERR_UNAUTH))
+      (asserts! (is-none existing) (err ERR_EXISTS_EQ))
+      (map-set equipment-coops id {treasury:treasury, fee-bps:fee-bps, active:active})
+      (ok true)
+    )
+  )
+)
 (define-public (set-equipment-coop-active (id uint) (active bool))
-  (begin
-    (asserts! (is-eq tx-sender (var-get equipment-contract-owner)) ERR_UNAUTH)
-    (match (map-get? equipment-coops id)
-      c (begin (map-set equipment-coops id {treasury:(get treasury c), fee-bps:(get fee-bps c), active:active}) (ok true))
-      none (err ERR_NOT_FOUND_EQ))))
+  (let
+    ((coop-data (unwrap! (map-get? equipment-coops id) (err ERR_NOT_FOUND_EQ))))
+    (begin
+      (asserts! (is-eq tx-sender (var-get equipment-contract-owner)) (err ERR_UNAUTH))
+      (map-set equipment-coops id {treasury:(get treasury coop-data), fee-bps:(get fee-bps coop-data), active:active})
+      (ok true)
+    )
+  )
+)
 (define-public (join-equipment-coop (coop-id uint))
-  (match (map-get? equipment-coops coop-id)
-    c (if (get active c)
-           (begin (map-set equipment-member-coop tx-sender coop-id) (ok true))
-           (err ERR_COOP_INACTIVE))
-    none (err ERR_NOT_FOUND_EQ)))
+  (let
+    ((coop-data (unwrap! (map-get? equipment-coops coop-id) (err ERR_NOT_FOUND_EQ))))
+    (if (get active coop-data)
+      (begin (map-set equipment-member-coop tx-sender coop-id) (ok true))
+      (err ERR_COOP_INACTIVE)
+    )
+  )
+)
 (define-public (list-equipment (name (string-ascii 48)) (rate uint) (period uint))
-  (match (map-get? equipment-member-coop tx-sender)
-    cid (let ((new-id (var-get next-eq-id)))
-         (begin
-           (map-set eqs new-id {owner:tx-sender, coop-id:cid, rate:rate, period:period, status:EQ_ACTIVE, name:name})
-           (var-set next-eq-id (+ new-id u1))
-           (ok new-id)))
-    none (err ERR_NOT_MEMBER_EQ)))
+  (let
+    ((cid (unwrap! (map-get? equipment-member-coop tx-sender) (err ERR_NOT_MEMBER_EQ)))
+     (new-id (var-get next-eq-id)))
+    (begin
+      (map-set eqs new-id {owner:tx-sender, coop-id:cid, rate:rate, period:period, status:EQ_ACTIVE, name:name})
+      (var-set next-eq-id (+ new-id u1))
+      (ok new-id)
+    )
+  )
+)
 (define-public (set-eq-status (eq-id uint) (status uint))
-  (match (map-get? eqs eq-id)
-    e (if (is-eq (get owner e) tx-sender)
-           (begin (map-set eqs eq-id {owner:(get owner e), coop-id:(get coop-id e), rate:(get rate e), period:(get period e), status:status, name:(get name e)}) (ok true))
-           (err ERR_UNAUTH))
-    none (err ERR_NOT_FOUND_EQ)))
+  (let
+    ((e (unwrap! (map-get? eqs eq-id) (err ERR_NOT_FOUND_EQ))))
+    (if (is-eq (get owner e) tx-sender)
+      (begin (map-set eqs eq-id {owner:(get owner e), coop-id:(get coop-id e), rate:(get rate e), period:(get period e), status:status, name:(get name e)}) (ok true))
+      (err ERR_UNAUTH)
+    )
+  )
+)
 (define-public (set-slot (eq-id uint) (slot-id uint) (open bool))
-  (match (map-get? eqs eq-id)
-    e (if (is-eq (get owner e) tx-sender)
-           (begin (map-set slots {eq-id:eq-id, slot-id:slot-id} open) (ok true))
-           (err ERR_UNAUTH))
-    none (err ERR_NOT_FOUND_EQ)))
+  (let
+    ((e (unwrap! (map-get? eqs eq-id) (err ERR_NOT_FOUND_EQ))))
+    (if (is-eq (get owner e) tx-sender)
+      (begin (map-set slots {eq-id:eq-id, slot-id:slot-id} open) (ok true))
+      (err ERR_UNAUTH)
+    )
+  )
+)
 (define-public (request-book (eq-id uint) (slot-id uint) (amount uint))
-  (let ((e (map-get? eqs eq-id)) (s (map-get? slots {eq-id:eq-id, slot-id:slot-id})))
-    (match e
-      eq (if (is-eq (get status eq) EQ_ACTIVE)
-              (match s
-                sl (if (get open sl)
-                        (match (map-get? equipment-member-coop tx-sender)
-                          rc (let ((bid (var-get next-book-id)) (owner (get owner eq)) (oc (get coop-id eq)))
-                               (begin
-                                 (map-set books {id:bid} {eq-id:eq-id, slot-id:slot-id, renter:tx-sender, owner:owner, owner-coop:oc, renter-coop:rc, amount:amount, status:BK_PENDING})
-                                 (var-set next-book-id (+ bid u1))
-                                 (asserts! (is-ok (stx-transfer? amount tx-sender (as-contract tx-sender))) ERR_STX)
-                                 (map-set escrows {id:bid} {amt:amount})
-                                 (map-set slots {eq-id:eq-id, slot-id:slot-id} {open:false})
-                                 (ok bid)))
-                          none (err ERR_NOT_MEMBER_EQ))
-                        (err ERR_SLOT_CLOSED))
-                none (err ERR_NOT_FOUND_EQ))
-             (err ERR_BAD_STATUS))
-      none (err ERR_NOT_FOUND_EQ))))
+  (let
+    ((eq (unwrap! (map-get? eqs eq-id) (err ERR_NOT_FOUND_EQ)))
+     (sl (unwrap! (map-get? slots {eq-id:eq-id, slot-id:slot-id}) (err ERR_NOT_FOUND_EQ)))
+     (rc (unwrap! (map-get? equipment-member-coop tx-sender) (err ERR_NOT_MEMBER_EQ)))
+     (bid (var-get next-book-id))
+     (owner (get owner eq))
+     (oc (get coop-id eq)))
+    (begin
+      (asserts! (is-eq (get status eq) EQ_ACTIVE) (err ERR_BAD_STATUS))
+      (asserts! sl (err ERR_SLOT_CLOSED))
+      (map-set books bid {eq-id:eq-id, slot-id:slot-id, renter:tx-sender, owner:owner, owner-coop:oc, renter-coop:rc, amount:amount, status:BK_PENDING})
+      (var-set next-book-id (+ bid u1))
+      (try! (stx-transfer? amount tx-sender (as-contract tx-sender)))
+      (map-set escrows bid amount)
+      (map-set slots {eq-id:eq-id, slot-id:slot-id} false)
+      (ok bid)
+    )
+  )
+)
 (define-public (accept-book (booking-id uint))
-  (match (map-get? books booking-id)
-    b (if (is-eq (get owner b) tx-sender)
-           (if (is-eq (get status b) BK_PENDING)
-               (begin (map-set books {id:booking-id} {eq-id:(get eq-id b), slot-id:(get slot-id b), renter:(get renter b), owner:(get owner b), owner-coop:(get owner-coop b), renter-coop:(get renter-coop b), amount:(get amount b), status:BK_ACCEPTED}) (ok true))
-               (err ERR_BAD_STATUS))
-           (err ERR_UNAUTH))
-    none (err ERR_NOT_FOUND_EQ)))
+  (let
+    ((b (unwrap! (map-get? books booking-id) (err ERR_NOT_FOUND_EQ))))
+    (begin
+      (asserts! (is-eq (get owner b) tx-sender) (err ERR_UNAUTH))
+      (asserts! (is-eq (get status b) BK_PENDING) (err ERR_BAD_STATUS))
+      (map-set books booking-id {eq-id:(get eq-id b), slot-id:(get slot-id b), renter:(get renter b), owner:(get owner b), owner-coop:(get owner-coop b), renter-coop:(get renter-coop b), amount:(get amount b), status:BK_ACCEPTED})
+      (ok true)
+    )
+  )
+)
 (define-public (start-book (booking-id uint))
-  (match (map-get? books booking-id)
-    b (if (or (is-eq (get owner b) tx-sender) (is-eq (get renter b) tx-sender))
-           (if (is-eq (get status b) BK_ACCEPTED)
-               (begin (map-set books {id:booking-id} {eq-id:(get eq-id b), slot-id:(get slot-id b), renter:(get renter b), owner:(get owner b), owner-coop:(get owner-coop b), renter-coop:(get renter-coop b), amount:(get amount b), status:BK_LIVE}) (ok true))
-               (err ERR_BAD_STATUS))
-           (err ERR_UNAUTH))
-    none (err ERR_NOT_FOUND_EQ)))
+  (let
+    ((b (unwrap! (map-get? books booking-id) (err ERR_NOT_FOUND_EQ))))
+    (begin
+      (asserts! (or (is-eq (get owner b) tx-sender) (is-eq (get renter b) tx-sender)) (err ERR_UNAUTH))
+      (asserts! (is-eq (get status b) BK_ACCEPTED) (err ERR_BAD_STATUS))
+      (map-set books booking-id {eq-id:(get eq-id b), slot-id:(get slot-id b), renter:(get renter b), owner:(get owner b), owner-coop:(get owner-coop b), renter-coop:(get renter-coop b), amount:(get amount b), status:BK_LIVE})
+      (ok true)
+    )
+  )
+)
 (define-public (return-book (booking-id uint))
-  (match (map-get? books booking-id)
-    b (if (is-eq (get renter b) tx-sender)
-           (if (is-eq (get status b) BK_LIVE)
-               (begin (map-set books {id:booking-id} {eq-id:(get eq-id b), slot-id:(get slot-id b), renter:(get renter b), owner:(get owner b), owner-coop:(get owner-coop b), renter-coop:(get renter-coop b), amount:(get amount b), status:BK_RETURNED}) (ok true))
-               (err ERR_BAD_STATUS))
-           (err ERR_UNAUTH))
-    none (err ERR_NOT_FOUND_EQ)))
+  (let
+    ((b (unwrap! (map-get? books booking-id) (err ERR_NOT_FOUND_EQ))))
+    (begin
+      (asserts! (is-eq (get renter b) tx-sender) (err ERR_UNAUTH))
+      (asserts! (is-eq (get status b) BK_LIVE) (err ERR_BAD_STATUS))
+      (map-set books booking-id {eq-id:(get eq-id b), slot-id:(get slot-id b), renter:(get renter b), owner:(get owner b), owner-coop:(get owner-coop b), renter-coop:(get renter-coop b), amount:(get amount b), status:BK_RETURNED})
+      (ok true)
+    )
+  )
+)
 (define-private (payout (amt uint) (to principal))
   (stx-transfer? amt (as-contract tx-sender) to))
 (define-private (upd-rep (u principal) (d-inc uint) (c-inc uint))
-  (let ((r (map-get? reps u)))
-    (match r
-      x (begin (map-set reps u {done:(+ (get done x) d-inc), cancel:(+ (get cancel x) c-inc), score:(+ (get score x) d-inc)}) (ok true))
-      none (begin (map-set reps u {done:d-inc, cancel:c-inc, score:d-inc}) (ok true))))
+  (let ((r (default-to {done: u0, cancel: u0, score: u0} (map-get? reps u))))
+    (begin
+      (map-set reps u {
+        done: (+ (get done r) d-inc),
+        cancel: (+ (get cancel r) c-inc),
+        score: (+ (get score r) d-inc)
+      })
+      (ok true)
+    )
+  )
+)
 (define-public (verify-return (booking-id uint))
-  (match (map-get? books booking-id)
-    b (if (is-eq (get owner b) tx-sender)
-           (if (is-eq (get status b) BK_RETURNED)
-               (let ((amt (default-to u0 (default-to u0 (map-get? escrows booking-id)))) (oc (get owner-coop b)) (rc (get renter-coop b)))
-                 (match (map-get? equipment-coops oc)
-                   co (let ((fee-bps (get fee-bps co)) (owner-fee-share (/ (* amt fee-bps) BPS)) (owner-coop-share (/ (* owner-fee-share SPLIT) BPS)) (renter-coop-share (- owner-fee-share owner-coop-share)) (to-owner (- amt owner-fee-share)))
-                         (begin
-                           (asserts! (is-ok (payout to-owner (get owner b))) ERR_STX)
-                           (asserts! (is-ok (payout owner-coop-share (get treasury co))) ERR_STX)
-                           (match (map-get? equipment-coops rc)
-                             rcx (asserts! (is-ok (payout renter-coop-share (get treasury rcx))) ERR_STX)
-                             none (ok true))
-                           (map-delete escrows {id:booking-id})
-                           (map-set books booking-id {eq-id:(get eq-id b), slot-id:(get slot-id b), renter:(get renter b), owner:(get owner b), owner-coop:(get owner-coop b), renter-coop:(get renter-coop b), amount:(get amount b), status:BK_VERIFIED})
-                           (unwrap-panic (upd-rep (get renter b) u1 u0))
-                           (unwrap-panic (upd-rep (get owner b) u1 u0))
-                           (ok true)))
-                   none (err ERR_NOT_FOUND_EQ)))
-               (err ERR_BAD_STATUS))
-           (err ERR_UNAUTH))
-    none (err ERR_NOT_FOUND_EQ)))
+  (let
+    ((b (unwrap! (map-get? books booking-id) (err ERR_NOT_FOUND_EQ)))
+     (amt (default-to u0 (map-get? escrows booking-id)))
+     (oc (get owner-coop b))
+     (rc (get renter-coop b))
+     (co (unwrap! (map-get? equipment-coops oc) (err ERR_NOT_FOUND_EQ)))
+     (fee-bps (get fee-bps co))
+     (owner-fee-share (/ (* amt fee-bps) BPS))
+     (owner-coop-share (/ (* owner-fee-share SPLIT) BPS))
+     (renter-coop-share (- owner-fee-share owner-coop-share))
+     (to-owner (- amt owner-fee-share)))
+    (begin
+      (asserts! (is-eq (get owner b) tx-sender) (err ERR_UNAUTH))
+      (asserts! (is-eq (get status b) BK_RETURNED) (err ERR_BAD_STATUS))
+      (try! (payout to-owner (get owner b)))
+      (try! (payout owner-coop-share (get treasury co)))
+      (match (map-get? equipment-coops rc)
+        rcx (try! (payout renter-coop-share (get treasury rcx)))
+        true
+      )
+      (map-delete escrows booking-id)
+      (map-set books booking-id {eq-id:(get eq-id b), slot-id:(get slot-id b), renter:(get renter b), owner:(get owner b), owner-coop:(get owner-coop b), renter-coop:(get renter-coop b), amount:(get amount b), status:BK_VERIFIED})
+      (unwrap-panic (upd-rep (get renter b) u1 u0))
+      (unwrap-panic (upd-rep (get owner b) u1 u0))
+      (ok true)
+    )
+  )
+)
 (define-public (cancel-book (booking-id uint))
-  (match (map-get? books booking-id)
-    b (if (is-eq (get renter b) tx-sender)
-           (if (is-eq (get status b) BK_PENDING)
-               (let ((amt (default-to u0 (map-get? escrows booking-id))) (eq-id (get eq-id b)) (slot-id (get slot-id b)))
-                 (begin
-                   (asserts! (is-ok (stx-transfer? amt (as-contract tx-sender) tx-sender)) ERR_STX)
-                   (map-delete escrows booking-id)
-                   (map-set books booking-id {eq-id:eq-id, slot-id:slot-id, renter:(get renter b), owner:(get owner b), owner-coop:(get owner-coop b), renter-coop:(get renter-coop b), amount:(get amount b), status:BK_CANCELED})
-                   (map-set slots {eq-id:eq-id, slot-id:slot-id} {open:true})
-                   (unwrap-panic (upd-rep (get renter b) u0 u1))
-                   (ok true)))
-               (err ERR_BAD_STATUS))
-           (err ERR_UNAUTH))
-    none (err ERR_NOT_FOUND_EQ)))
+  (let
+    ((b (unwrap! (map-get? books booking-id) (err ERR_NOT_FOUND_EQ)))
+     (amt (default-to u0 (map-get? escrows booking-id)))
+     (eq-id (get eq-id b))
+     (slot-id (get slot-id b)))
+    (begin
+      (asserts! (is-eq (get renter b) tx-sender) (err ERR_UNAUTH))
+      (asserts! (is-eq (get status b) BK_PENDING) (err ERR_BAD_STATUS))
+      (try! (as-contract (stx-transfer? amt tx-sender tx-sender)))
+      (map-delete escrows booking-id)
+      (map-set books booking-id {eq-id:eq-id, slot-id:slot-id, renter:(get renter b), owner:(get owner b), owner-coop:(get owner-coop b), renter-coop:(get renter-coop b), amount:(get amount b), status:BK_CANCELED})
+      (map-set slots {eq-id:eq-id, slot-id:slot-id} true)
+      (unwrap-panic (upd-rep (get renter b) u0 u1))
+      (ok true)
+    )
+  )
+)
 (define-read-only (get-equipment (eq-id uint))
   (map-get? eqs eq-id))
 (define-read-only (get-slot (eq-id uint) (slot-id uint))
@@ -899,143 +991,217 @@
 (define-read-only (get-booking (booking-id uint))
   (map-get? books booking-id))
 (define-read-only (get-reputation (user principal))
-  (map-get? reps user))
+  (map-get? reps user)
+)
 
-;; FARMER REPUTATION AND RELIABILITY SCORING SYSTEM
-;; Tracks farmer performance metrics including completed tasks, reliability score, and participation history
-
-;; Initialize a farmer's reputation profile with default values
-;; Initial reliability score starts at 50 (medium)
-(define-public (initialize-farmer-reputation (farmer principal))
+(define-public (create-funded-project 
+  (coop-id uint) 
+  (title (string-ascii 100)) 
+  (description (string-ascii 500)) 
+  (total-budget uint)
+  (total-milestones uint))
   (let
     (
+      (member-data (unwrap! (map-get? coop-members { coop-id: coop-id, member: tx-sender }) ERR_NOT_MEMBER))
+      (resources (unwrap! (map-get? coop-resources coop-id) ERR_NOT_FOUND))
+      (new-project-id (+ (var-get project-id-counter) u1))
       (current-block stacks-block-height)
     )
-    (map-set farmer-reputation farmer
+    (asserts! (get is-active member-data) ERR_NOT_MEMBER)
+    (asserts! (> total-budget u0) ERR_INVALID_AMOUNT)
+    (asserts! (> total-milestones u0) ERR_INVALID_AMOUNT)
+    (asserts! (>= (get available-funds resources) total-budget) ERR_INSUFFICIENT_FUNDS)
+    (map-set coop-resources coop-id
+      (merge resources { available-funds: (- (get available-funds resources) total-budget) })
+    )
+    (map-set funded-projects new-project-id
       {
-        reliability-score: u50,
-        tasks-completed: u0,
-        tasks-failed: u0,
-        last-updated: current-block,
-        participation-count: u0
+        coop-id: coop-id,
+        project-owner: tx-sender,
+        title: title,
+        description: description,
+        total-budget: total-budget,
+        total-milestones: total-milestones,
+        completed-milestones: u0,
+        released-amount: u0,
+        is-active: true,
+        created-at: current-block
       }
+    )
+    (var-set project-id-counter new-project-id)
+    (ok new-project-id)
+  )
+)
+
+(define-public (add-project-milestone
+  (project-id uint)
+  (description (string-ascii 200))
+  (budget uint))
+  (let
+    (
+      (project-data (unwrap! (map-get? funded-projects project-id) ERR_PROJECT_NOT_FOUND))
+      (current-block stacks-block-height)
+      (new-milestone-id (+ (var-get milestone-id-counter) u1))
+      (voting-end (+ current-block u144))
+    )
+    (asserts! (is-eq tx-sender (get project-owner project-data)) ERR_NOT_PROJECT_OWNER)
+    (asserts! (get is-active project-data) ERR_PROJECT_CLOSED)
+    (asserts! (> budget u0) ERR_INVALID_AMOUNT)
+    (map-set project-milestones { project-id: project-id, milestone-id: new-milestone-id }
+      {
+        description: description,
+        budget: budget,
+        is-completed: false,
+        is-approved: false,
+        is-released: false,
+        completion-date: u0,
+        approval-votes: u0,
+        rejection-votes: u0,
+        voting-end: voting-end
+      }
+    )
+    (var-set milestone-id-counter new-milestone-id)
+    (ok new-milestone-id)
+  )
+)
+
+(define-public (submit-milestone-completion
+  (project-id uint)
+  (milestone-id uint))
+  (let
+    (
+      (project-data (unwrap! (map-get? funded-projects project-id) ERR_PROJECT_NOT_FOUND))
+      (milestone-data (unwrap! (map-get? project-milestones { project-id: project-id, milestone-id: milestone-id }) ERR_MILESTONE_NOT_FOUND))
+      (current-block stacks-block-height)
+    )
+    (asserts! (is-eq tx-sender (get project-owner project-data)) ERR_NOT_PROJECT_OWNER)
+    (asserts! (get is-active project-data) ERR_PROJECT_CLOSED)
+    (asserts! (not (get is-completed milestone-data)) ERR_MILESTONE_COMPLETED)
+    (map-set project-milestones { project-id: project-id, milestone-id: milestone-id }
+      (merge milestone-data 
+        {
+          is-completed: true,
+          completion-date: current-block
+        }
+      )
     )
     (ok true)
   )
 )
 
-;; Record a successfully completed task for a farmer
-;; Increases reliability score by 5 points and increments task counter
-(define-public (record-task-completion (farmer principal))
+(define-public (vote-on-milestone
+  (project-id uint)
+  (milestone-id uint)
+  (approve bool))
   (let
     (
+      (project-data (unwrap! (map-get? funded-projects project-id) ERR_PROJECT_NOT_FOUND))
+      (milestone-data (unwrap! (map-get? project-milestones { project-id: project-id, milestone-id: milestone-id }) ERR_MILESTONE_NOT_FOUND))
+      (member-data (unwrap! (map-get? coop-members { coop-id: (get coop-id project-data), member: tx-sender }) ERR_NOT_MEMBER))
       (current-block stacks-block-height)
-      (rep-data (default-to 
-        { reliability-score: u50, tasks-completed: u0, tasks-failed: u0, last-updated: current-block, participation-count: u0 }
-        (map-get? farmer-reputation farmer)
-      ))
+      (existing-vote (map-get? milestone-votes { project-id: project-id, milestone-id: milestone-id, voter: tx-sender }))
     )
-    
-    (map-set farmer-reputation farmer
-      {
-        reliability-score: (+ (get reliability-score rep-data) u5),
-        tasks-completed: (+ (get tasks-completed rep-data) u1),
-        tasks-failed: (get tasks-failed rep-data),
-        last-updated: current-block,
-        participation-count: (+ (get participation-count rep-data) u1)
-      }
+    (asserts! (get is-active member-data) ERR_NOT_MEMBER)
+    (asserts! (get is-completed milestone-data) ERR_MILESTONE_NOT_COMPLETED)
+    (asserts! (< current-block (get voting-end milestone-data)) ERR_VOTING_CLOSED)
+    (asserts! (is-none existing-vote) ERR_ALREADY_VOTED)
+    (let ((voting-power (get shares member-data)))
+      (map-set milestone-votes { project-id: project-id, milestone-id: milestone-id, voter: tx-sender }
+        { approved: approve, voting-power: voting-power }
+      )
+      (map-set project-milestones { project-id: project-id, milestone-id: milestone-id }
+        (merge milestone-data
+          {
+            approval-votes: (if approve (+ (get approval-votes milestone-data) voting-power) (get approval-votes milestone-data)),
+            rejection-votes: (if approve (get rejection-votes milestone-data) (+ (get rejection-votes milestone-data) voting-power))
+          }
+        )
+      )
     )
     (ok true)
   )
 )
 
-;; Record a failed or incomplete task for a farmer
-;; Decreases reliability score by 3 points and increments failure counter
-(define-public (record-task-failure (farmer principal))
+(define-public (release-milestone-payment
+  (project-id uint)
+  (milestone-id uint))
   (let
     (
-      (current-block stacks-block-height)
-      (rep-data (default-to 
-        { reliability-score: u50, tasks-completed: u0, tasks-failed: u0, last-updated: current-block, participation-count: u0 }
-        (map-get? farmer-reputation farmer)
-      ))
-      (new-score (if (>= (get reliability-score rep-data) u3) (- (get reliability-score rep-data) u3) u0))
-    )
-    
-    (map-set farmer-reputation farmer
-      {
-        reliability-score: new-score,
-        tasks-completed: (get tasks-completed rep-data),
-        tasks-failed: (+ (get tasks-failed rep-data) u1),
-        last-updated: current-block,
-        participation-count: (+ (get participation-count rep-data) u1)
-      }
-    )
-    (ok true)
-  )
-)
-
-;; Submit a rating for another farmer (1-10 scale)
-;; One rating per rater-rated pair; updates existing rating if already rated
-(define-public (submit-farmer-rating (rated-farmer principal) (rating uint) (comment (string-ascii 200)))
-  (let
-    (
+      (project-data (unwrap! (map-get? funded-projects project-id) ERR_PROJECT_NOT_FOUND))
+      (milestone-data (unwrap! (map-get? project-milestones { project-id: project-id, milestone-id: milestone-id }) ERR_MILESTONE_NOT_FOUND))
       (current-block stacks-block-height)
     )
-    (asserts! (and (>= rating u1) (<= rating u10)) ERR_INVALID_SCORE)
-    (asserts! (not (is-eq tx-sender rated-farmer)) ERR_UNAUTHORIZED)
-    
-    (map-set farmer-ratings { rater: tx-sender, rated: rated-farmer }
-      {
-        rating: rating,
-        comment: comment,
-        timestamp: current-block
-      }
+    (asserts! (get is-active project-data) ERR_PROJECT_CLOSED)
+    (asserts! (get is-completed milestone-data) ERR_MILESTONE_NOT_COMPLETED)
+    (asserts! (not (get is-released milestone-data)) ERR_ALREADY_RELEASED)
+    (asserts! (>= current-block (get voting-end milestone-data)) ERR_VOTING_CLOSED)
+    (asserts! (> (get approval-votes milestone-data) (get rejection-votes milestone-data)) ERR_CLAIM_NOT_APPROVED)
+    (try! (as-contract (stx-transfer? (get budget milestone-data) tx-sender (get project-owner project-data))))
+    (map-set project-milestones { project-id: project-id, milestone-id: milestone-id }
+      (merge milestone-data 
+        {
+          is-approved: true,
+          is-released: true
+        }
+      )
     )
-    (ok true)
+    (map-set funded-projects project-id
+      (merge project-data
+        {
+          completed-milestones: (+ (get completed-milestones project-data) u1),
+          released-amount: (+ (get released-amount project-data) (get budget milestone-data))
+        }
+      )
+    )
+    (ok (get budget milestone-data))
   )
 )
 
-;; Get a farmer's current reputation profile
-;; Returns None if the farmer has no profile yet
-(define-read-only (get-farmer-reputation (farmer principal))
-  (map-get? farmer-reputation farmer)
-)
-
-;; Get a rating submitted by one farmer for another
-;; Returns None if no rating exists between the two farmers
-(define-read-only (get-farmer-rating (rater principal) (rated principal))
-  (map-get? farmer-ratings { rater: rater, rated: rated })
-)
-
-;; Calculate average reliability score for a farmer
-;; Returns the reliability score divided by participation count
-;; Returns 0 if no participation yet
-(define-read-only (get-average-reliability-score (farmer principal))
+(define-public (close-project (project-id uint))
   (let
     (
-      (default-rep { reliability-score: u0, tasks-completed: u0, tasks-failed: u0, last-updated: u0, participation-count: u0 })
-      (rep-data (default-to default-rep (map-get? farmer-reputation farmer)))
+      (project-data (unwrap! (map-get? funded-projects project-id) ERR_PROJECT_NOT_FOUND))
+      (remaining-budget (- (get total-budget project-data) (get released-amount project-data)))
+      (resources (unwrap! (map-get? coop-resources (get coop-id project-data)) ERR_NOT_FOUND))
     )
-    (if (> (get participation-count rep-data) u0)
-      (/ (get reliability-score rep-data) (get participation-count rep-data))
-      u0
+    (asserts! (is-eq tx-sender (get project-owner project-data)) ERR_NOT_PROJECT_OWNER)
+    (asserts! (get is-active project-data) ERR_PROJECT_CLOSED)
+    (if (> remaining-budget u0)
+      (map-set coop-resources (get coop-id project-data)
+        (merge resources { available-funds: (+ (get available-funds resources) remaining-budget) })
+      )
+      true
     )
+    (map-set funded-projects project-id
+      (merge project-data { is-active: false })
+    )
+    (ok remaining-budget)
   )
 )
 
-;; Calculate success rate for a farmer
-;; Returns tasks completed / total tasks, or 0 if no tasks
-(define-read-only (get-farmer-success-rate (farmer principal))
-  (let
-    (
-      (default-rep { reliability-score: u0, tasks-completed: u0, tasks-failed: u0, last-updated: u0, participation-count: u0 })
-      (rep-data (default-to default-rep (map-get? farmer-reputation farmer)))
-      (total-tasks (+ (get tasks-completed rep-data) (get tasks-failed rep-data)))
-    )
-    (if (> total-tasks u0)
-      (/ (* (get tasks-completed rep-data) u100) total-tasks)
-      u0
-    )
+(define-read-only (get-funded-project (project-id uint))
+  (map-get? funded-projects project-id)
+)
+
+(define-read-only (get-project-milestone (project-id uint) (milestone-id uint))
+  (map-get? project-milestones { project-id: project-id, milestone-id: milestone-id })
+)
+
+(define-read-only (get-milestone-vote (project-id uint) (milestone-id uint) (voter principal))
+  (map-get? milestone-votes { project-id: project-id, milestone-id: milestone-id, voter: voter })
+)
+
+(define-read-only (get-project-progress (project-id uint))
+  (match (map-get? funded-projects project-id)
+    project-data (ok {
+      completed: (get completed-milestones project-data),
+      total: (get total-milestones project-data),
+      released: (get released-amount project-data),
+      budget: (get total-budget project-data),
+      percentage: (if (> (get total-milestones project-data) u0)
+        (/ (* (get completed-milestones project-data) u100) (get total-milestones project-data))
+        u0)
+    })
+    ERR_PROJECT_NOT_FOUND
   )
 )
